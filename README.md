@@ -19,12 +19,19 @@ No necesitas clave VAPID: si no pasas `vapidKey` se usa la de FCM por defecto.
 
 ## 2. Instalar
 
-Copia esta carpeta dentro de tu proyecto como módulo:
+Se publica con [JitPack](https://jitpack.io/#eliasmp07/fcm-desktop). Agrega el repositorio:
 
 ```kotlin
 // settings.gradle.kts
-include(":fcm-desktop")
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        maven("https://jitpack.io")
+    }
+}
 ```
+
+Y la dependencia en el source set de desktop:
 
 ```kotlin
 // build.gradle.kts de tu módulo compartido
@@ -32,14 +39,12 @@ kotlin {
     sourceSets {
         val desktopMain by getting {          // o jvmMain, según el nombre de tu target
             dependencies {
-                implementation(project(":fcm-desktop"))
+                implementation("com.github.eliasmp07:fcm-desktop:v0.1.0")
             }
         }
     }
 }
 ```
-
-Las versiones de coroutines y serialization del `build.gradle.kts` del módulo se pueden igualar a las de tu proyecto.
 
 ## 3. Usar
 

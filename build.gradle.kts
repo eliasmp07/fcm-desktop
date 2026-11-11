@@ -5,8 +5,7 @@ plugins {
     `maven-publish`
 }
 
-group = "io.github.eliasmp07"
-version = "0.1.0"
+// group and version live in gradle.properties so JitPack can override them (-Pgroup, -Pversion).
 
 repositories {
     mavenCentral()
