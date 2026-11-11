@@ -34,7 +34,8 @@ fcm.start()
 
 - **Real FCM tokens**: works with the HTTP v1 API, the Admin SDK and the Firebase console.
 - **`notification` and `data` messages**, with Web Push decryption (`aesgcm` and `aes128gcm`).
-- **Native notifications** on Windows, macOS and Linux out of the box, or bring your own UI.
+- **Rich notifications** built in: big picture, avatar, action buttons and inline reply, in light and dark themes.
+- **Native notifications** on Windows, macOS and Linux as the zero-setup default, or bring your own UI.
 - **Coroutines-first API**: `StateFlow` for the token and connection state, `SharedFlow` for messages.
 - **Stable token** across restarts, weekly refresh, and automatic re-registration if FCM drops the device.
 - **Resilient connection**: heartbeats, exponential backoff with jitter, de-duplicated deliveries.
@@ -45,6 +46,7 @@ fcm.start()
 - [Installation](#installation)
 - [Firebase setup](#firebase-setup)
 - [Usage](#usage)
+- [Rich notifications](#rich-notifications)
 - [Sending messages](#sending-messages)
 - [How it works](#how-it-works)
 - [Limitations](#limitations)
@@ -73,7 +75,7 @@ kotlin {
     sourceSets {
         val desktopMain by getting {          // or jvmMain, depending on your target name
             dependencies {
-                implementation("com.github.eliasmp07:fcm-desktop:v0.1.0")
+                implementation("com.github.eliasmp07:fcm-desktop:v0.2.0")
             }
         }
     }
@@ -181,7 +183,7 @@ Messages with a `notification` block are displayed automatically by `SystemDeskt
 | macOS | Notification Center through `osascript` (attributed to "Script Editor"). |
 | Linux | `notify-send`, falling back to the system tray. |
 
-To own the UI, pass a custom `DesktopNotifier`, or `notifier = null` and render from `messages`. Data-only messages never display anything.
+For pictures, buttons and replies use the built-in [rich notifications](#rich-notifications). To own the UI entirely, pass a custom `DesktopNotifier`, or `notifier = null` and render from `messages`. Data-only messages never display anything.
 
 ### Configuration
 
@@ -199,6 +201,68 @@ Other extension points:
 
 - **`CredentialStore`**: where the registration lives between runs. The default is a per-user file (`%APPDATA%`, `~/Library/Application Support` or `~/.config`). Implement it to use an encrypted store.
 - **`FcmLogger`**: `FcmLogger.Stderr` (default), `FcmLogger.None`, or your own. Tokens and keys are never logged.
+
+## Rich notifications
+
+`java.awt.TrayIcon` can only show a title and a line of text. The library ships its own notification center, drawn by the app, with what Android notifications have: pictures, a sender avatar, action buttons and inline replies. It looks the same on Windows, macOS and Linux.
+
+<p align="center"><img src="docs/notifications.png" width="720" alt="Rich notifications in light and dark themes"></p>
+
+```kotlin
+val center = DesktopNotificationCenter(
+    NotificationCenterConfig(appName = "MyApp", appIcon = NotificationImage.Resource("icon.png")),
+)
+
+center.show(
+    RichNotification(
+        title = "Ana Torres",
+        body = "Are you joining the 4 pm meeting?",
+        largeIcon = NotificationImage.Url("https://example.com/ana.png"),
+        image = NotificationImage.Url("https://example.com/photo.jpg"),
+        actions = listOf(
+            NotificationAction("Open chat") { openChat("ana") },
+            NotificationAction("Mute") { mute("ana") },
+        ),
+        reply = NotificationReply(placeholder = "Reply") { text -> chat.send("ana", text) },
+        onClick = { openChat("ana") },
+    )
+)
+```
+
+It works on its own for local notifications, and plugs into FCM with `RichDesktopNotifier`:
+
+```kotlin
+val fcm = FcmDesktop(
+    options = options,
+    notifier = RichDesktopNotifier(center) { push ->
+        // Title, body and `notification.image` are mapped for you; add what the push needs.
+        RichDesktopNotifier.defaultNotification(push).copy(
+            reply = NotificationReply { text -> chat.send(push.message.data["chatId"], text) },
+        )
+    },
+)
+```
+
+| Feature | How |
+|---|---|
+| Big picture | `image` |
+| Avatar | `largeIcon`, shown round |
+| App icon and name | `icon` / `appName`, or once in `NotificationCenterConfig` |
+| Buttons | up to three `NotificationAction`s; `dismissOnClick = false` keeps it open |
+| Inline reply | `NotificationReply`; Enter or the button sends |
+| Update in place | `show()` again with the same `id` |
+| Dismiss | `center.dismiss(id)`, `center.dismissAll()` |
+| Timeout | `timeoutMillis` (`0` = sticky); pauses while hovered or while typing a reply |
+| Result | `onDismiss` reports `Timeout`, `Closed`, `Clicked`, `Action`, `Replied` or `Cancelled` |
+| Look | `theme` (light, dark, system), `accentColor`, `position`, `width`, `maxVisible` |
+
+Images can come from a URL, a file, a classpath resource, raw bytes or an AWT image. They load in the background; downloads are limited to `http(s)`, 5 MB and 10 seconds. Pushes that share a collapse key replace each other, like notification tags on Android.
+
+Things to know:
+
+- Callbacks run on the AWT event thread. Launch a coroutine for anything slow.
+- These are windows of your app, not OS notifications: they do not appear in the system notification history and they follow no "do not disturb" setting.
+- They are shown on the primary screen.
 
 ## Sending messages
 
@@ -270,6 +334,7 @@ The suite covers three layers:
 
 - **Wire format**: the hand-written protobuf codec matches `protobuf` byte for byte on the reference `.proto` files.
 - **Encryption**: messages encrypted by Python's `http_ece` decrypt correctly, in both encodings and across multiple records.
+- **Notifications**: text wrapping, image limits, card layout, and (when a display is available) stacking, queueing, timeouts, actions and replies on real windows.
 - **End to end**: a local fake of Google's servers (HTTP + MCS) drives registration, login, delivery, acks, duplicates, restarts, reconnection, heartbeats, re-registration, token refresh and deletion.
 
 The suite runs offline: it does not talk to Google's real servers. Fixtures are regenerated with `python tools/generate_fixtures.py`.

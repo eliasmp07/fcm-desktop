@@ -8,6 +8,7 @@ Firebase no tiene SDK de mensajería para desktop. Esta librería hace lo mismo 
 
 - Token FCM real (`messages:send` de la API HTTP v1, Admin SDK, consola de Firebase).
 - Recibe `notification` y `data`, descifra el payload (Web Push `aesgcm` y `aes128gcm`).
+- Notificaciones enriquecidas incluidas: imagen grande, avatar, botones y respuesta rápida, en tema claro y oscuro.
 - Muestra la notificación nativa (Windows, macOS, Linux) o te deja pintarla tú.
 - El token se conserva entre ejecuciones; reconexión automática con backoff.
 - Dependencias: solo `kotlinx-coroutines-core` y `kotlinx-serialization-json`. Requiere JDK 11+.
@@ -41,7 +42,7 @@ kotlin {
     sourceSets {
         val desktopMain by getting {          // o jvmMain, según el nombre de tu target
             dependencies {
-                implementation("com.github.eliasmp07:fcm-desktop:v0.1.0")
+                implementation("com.github.eliasmp07:fcm-desktop:v0.2.0")
             }
         }
     }
@@ -130,7 +131,69 @@ Por defecto (`SystemDesktopNotifier`) un push con bloque `notification` se muest
 
 Para controlar la UI pasa tu propio `DesktopNotifier`, o `notifier = null` y pinta desde `fcm.messages`. Los mensajes solo-`data` nunca muestran nada.
 
-### Enviar desde el backend
+## Notificaciones enriquecidas
+
+`java.awt.TrayIcon` solo muestra un título y una línea de texto. La librería trae su propio centro de notificaciones, dibujado por la app, con lo que tienen las de Android: imagen grande, avatar, botones de acción y respuesta rápida. Se ve igual en Windows, macOS y Linux.
+
+<p align="center"><img src="docs/notifications.png" width="720" alt="Notificaciones enriquecidas en tema claro y oscuro"></p>
+
+```kotlin
+val center = DesktopNotificationCenter(
+    NotificationCenterConfig(appName = "MiApp", appIcon = NotificationImage.Resource("icon.png")),
+)
+
+center.show(
+    RichNotification(
+        title = "Ana Torres",
+        body = "¿Llegas a la junta de las 4?",
+        largeIcon = NotificationImage.Url("https://example.com/ana.png"),
+        image = NotificationImage.Url("https://example.com/foto.jpg"),
+        actions = listOf(
+            NotificationAction("Abrir chat") { openChat("ana") },
+            NotificationAction("Silenciar") { mute("ana") },
+        ),
+        reply = NotificationReply(placeholder = "Responder", sendLabel = "Enviar") { texto -> chat.send("ana", texto) },
+        onClick = { openChat("ana") },
+    )
+)
+```
+
+Sirve sola para notificaciones locales, y se conecta a FCM con `RichDesktopNotifier`:
+
+```kotlin
+val fcm = FcmDesktop(
+    options = options,
+    notifier = RichDesktopNotifier(center) { push ->
+        // Título, cuerpo y `notification.image` ya vienen mapeados; agrega lo que necesite el push.
+        RichDesktopNotifier.defaultNotification(push).copy(
+            reply = NotificationReply { texto -> chat.send(push.message.data["chatId"], texto) },
+        )
+    },
+)
+```
+
+| Función | Cómo |
+|---|---|
+| Imagen grande | `image` |
+| Avatar | `largeIcon`, se muestra redondo |
+| Icono y nombre de la app | `icon` / `appName`, o una vez en `NotificationCenterConfig` |
+| Botones | hasta tres `NotificationAction`; `dismissOnClick = false` la deja abierta |
+| Respuesta rápida | `NotificationReply`; se envía con Enter o con el botón |
+| Actualizar | `show()` otra vez con el mismo `id` |
+| Cerrar | `center.dismiss(id)`, `center.dismissAll()` |
+| Duración | `timeoutMillis` (`0` = fija); se pausa con el cursor encima o al escribir una respuesta |
+| Resultado | `onDismiss` informa `Timeout`, `Closed`, `Clicked`, `Action`, `Replied` o `Cancelled` |
+| Apariencia | `theme` (claro, oscuro, sistema), `accentColor`, `position`, `width`, `maxVisible` |
+
+Las imágenes pueden venir de una URL, un archivo, un recurso del classpath, bytes o una imagen AWT. Se cargan en segundo plano; las descargas se limitan a `http(s)`, 5 MB y 10 segundos. Los push con la misma collapse key se reemplazan entre sí, como los tags de Android.
+
+A tener en cuenta:
+
+- Los callbacks corren en el hilo de eventos de AWT. Lanza una corrutina para lo que tarde.
+- Son ventanas de tu app, no notificaciones del sistema: no aparecen en el historial del SO ni respetan el modo "no molestar".
+- Se muestran en la pantalla principal.
+
+## Enviar desde el backend
 
 Igual que a cualquier token (API HTTP v1):
 
@@ -157,10 +220,11 @@ Topics: el token de desktop no se puede suscribir desde el cliente; suscríbelo 
 
 ## Estado de las pruebas
 
-`./gradlew test` corre 23 pruebas:
+`./gradlew test` corre 43 pruebas:
 
 - El codec protobuf escrito a mano produce los mismos bytes que `protobuf` con los `.proto` de referencia.
 - El descifrado Web Push abre mensajes cifrados por `http_ece` (Python), en ambos formatos y con varios registros.
+- Las notificaciones: ajuste de texto, límites de imágenes, layout de la tarjeta y, cuando hay pantalla, apilado, cola, timeouts, acciones y respuestas sobre ventanas reales.
 - Un servidor falso local (HTTP + MCS) ejercita el flujo completo: registro, login, entrega, acks, duplicados, reinicio con el mismo token, reconexión, heartbeat, re-registro al rechazar el login, refresco y borrado de token.
 
 Lo que **no** cubren: los servidores reales de Google. Los fixtures se regeneran con `python tools/generate_fixtures.py`.
