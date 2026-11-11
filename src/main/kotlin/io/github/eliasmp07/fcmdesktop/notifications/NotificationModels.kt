@@ -102,6 +102,24 @@ public enum class DismissReason {
     Cancelled,
 }
 
+public enum class NotificationBackend {
+    /**
+     * Windows drawn by the library. Identical on every OS and nothing to register, but they are not
+     * part of the system: no notification history, no "do not disturb".
+     */
+    InApp,
+
+    /**
+     * Real OS notifications: Windows 10/11 toasts and the freedesktop.org service on Linux (GNOME,
+     * KDE Plasma, ...). They appear in the system notification history and follow "do not disturb".
+     * The OS draws them, so the theme, position and width settings do not apply.
+     *
+     * A notification the OS cannot show falls back to [InApp]: everything on macOS, and on Linux
+     * the ones with features the desktop lacks (e.g. inline reply outside KDE Plasma).
+     */
+    Native,
+}
+
 public enum class NotificationPosition { TopRight, TopLeft, BottomRight, BottomLeft }
 
 public enum class NotificationTheme {
@@ -118,6 +136,10 @@ public enum class NotificationTheme {
  * @param defaultTimeoutMillis Used when a notification sets no timeout; `0` means sticky.
  * @param maxVisible Notifications on screen at once; the rest wait in a queue.
  * @param accentColor `0xRRGGBB` used for buttons. `null` picks one that fits the theme.
+ * @param backend Who draws the notifications. See [NotificationBackend].
+ * @param appId Identifies the app to the OS when [backend] is [NotificationBackend.Native]: the
+ *   AppUserModelID on Windows (pass the one of your installer's shortcut if it sets one) and the
+ *   desktop file id on Linux (e.g. `"com.example.myapp"`). Derived from [appName] when omitted.
  */
 public data class NotificationCenterConfig(
     val appName: String? = null,
@@ -129,6 +151,8 @@ public data class NotificationCenterConfig(
     val width: Int = 380,
     val screenMargin: Int = 16,
     val accentColor: Int? = null,
+    val backend: NotificationBackend = NotificationBackend.InApp,
+    val appId: String? = null,
 ) {
     init {
         require(defaultTimeoutMillis >= 0) { "defaultTimeoutMillis must not be negative" }

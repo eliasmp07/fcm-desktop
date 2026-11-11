@@ -35,6 +35,7 @@ fcm.start()
 - **Real FCM tokens**: works with the HTTP v1 API, the Admin SDK and the Firebase console.
 - **`notification` and `data` messages**, with Web Push decryption (`aesgcm` and `aes128gcm`).
 - **Rich notifications** built in: big picture, avatar, action buttons and inline reply, in light and dark themes.
+- **System integration** when you want it: Windows toasts and Linux desktop notifications, with history and Do Not Disturb.
 - **Native notifications** on Windows, macOS and Linux as the zero-setup default, or bring your own UI.
 - **Coroutines-first API**: `StateFlow` for the token and connection state, `SharedFlow` for messages.
 - **Stable token** across restarts, weekly refresh, and automatic re-registration if FCM drops the device.
@@ -75,7 +76,7 @@ kotlin {
     sourceSets {
         val desktopMain by getting {          // or jvmMain, depending on your target name
             dependencies {
-                implementation("com.github.eliasmp07:fcm-desktop:v0.2.0")
+                implementation("com.github.eliasmp07:fcm-desktop:v0.3.0")
             }
         }
     }
@@ -261,8 +262,46 @@ Images can come from a URL, a file, a classpath resource, raw bytes or an AWT im
 Things to know:
 
 - Callbacks run on the AWT event thread. Launch a coroutine for anything slow.
-- These are windows of your app, not OS notifications: they do not appear in the system notification history and they follow no "do not disturb" setting.
-- They are shown on the primary screen.
+- In-app windows are shown on the primary screen.
+
+### System notifications: history and Do Not Disturb
+
+By default the notifications are windows drawn by the library. Set `backend = NotificationBackend.Native` to hand them to the operating system instead, so they show up in its notification history and follow its Do Not Disturb / Focus setting:
+
+```kotlin
+val center = DesktopNotificationCenter(
+    NotificationCenterConfig(
+        appName = "MyApp",
+        appIcon = NotificationImage.Resource("icon.png"),
+        backend = NotificationBackend.Native,
+    ),
+)
+```
+
+The same `RichNotification` works with both backends. What each system can show:
+
+| | Windows 10/11 | Linux (GNOME, KDE Plasma, ...) | macOS |
+|---|---|---|---|
+| Shown by | toast notifications | freedesktop.org notification service | in-app windows |
+| History and Do Not Disturb | yes | yes | no |
+| Big picture, avatar | yes | one picture (the big one wins) | yes |
+| Action buttons | yes | yes | yes |
+| Inline reply | yes | KDE Plasma only; elsewhere that notification uses an in-app window | yes |
+| Replace by `id`, `dismiss` | yes | yes | yes |
+
+A notification the system cannot show falls back to the in-app window, so nothing is dropped: that is everything on macOS (native rich notifications there need a signed app bundle and native code), and whatever the Linux desktop does not support.
+
+Differences from the in-app backend:
+
+- The OS draws them: `theme`, `position`, `width`, `accentColor` and `maxVisible` do not apply, and the OS decides how long a banner stays. `timeoutMillis = 0` asks for a persistent one.
+- On Windows, pressing any button closes the toast, so `dismissOnClick = false` has no effect. `onDismiss` is not called when a banner merely times out, because the toast is still in the notification center.
+- Windows needs the app to be registered: on first use the library writes a per-user registry key (`HKCU\Software\Classes\AppUserModelId\<appId>`) with the app name and icon. Pass `appId` to use the AppUserModelID of your installer's shortcut.
+- Windows toasts go through a hidden Windows PowerShell helper process that lives as long as the center.
+- Buttons and replies only work while the app is running. Afterwards the notifications stay in the history but are inert.
+- Linux needs a JVM with Unix domain sockets (JDK 16+); older JVMs fall back to in-app windows.
+
+> [!NOTE]
+> The Linux backend is tested against a real D-Bus session bus. The Windows backend could not be run on Windows before release: its toast XML is unit-tested, the PowerShell helper is not. Please report what you see.
 
 ## Sending messages
 
@@ -335,6 +374,7 @@ The suite covers three layers:
 - **Wire format**: the hand-written protobuf codec matches `protobuf` byte for byte on the reference `.proto` files.
 - **Encryption**: messages encrypted by Python's `http_ece` decrypt correctly, in both encodings and across multiple records.
 - **Notifications**: text wrapping, image limits, card layout, and (when a display is available) stacking, queueing, timeouts, actions and replies on real windows.
+- **System notifications**: the Windows toast XML, and the Linux backend against a real session bus with a fake notification service (`tools/fake_notification_server.py`, opt-in with `FCM_DESKTOP_DBUS_TEST=1`).
 - **End to end**: a local fake of Google's servers (HTTP + MCS) drives registration, login, delivery, acks, duplicates, restarts, reconnection, heartbeats, re-registration, token refresh and deletion.
 
 The suite runs offline: it does not talk to Google's real servers. Fixtures are regenerated with `python tools/generate_fixtures.py`.

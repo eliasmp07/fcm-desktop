@@ -1,6 +1,9 @@
 package io.github.eliasmp07.fcmdesktop.notifications
 
 import io.github.eliasmp07.fcmdesktop.notifications.internal.CardListener
+import io.github.eliasmp07.fcmdesktop.notifications.internal.NativeBackend
+import io.github.eliasmp07.fcmdesktop.notifications.internal.NativeBackends
+import io.github.eliasmp07.fcmdesktop.notifications.internal.NativeContext
 import io.github.eliasmp07.fcmdesktop.notifications.internal.NotificationCard
 import io.github.eliasmp07.fcmdesktop.notifications.internal.Palette
 import io.github.eliasmp07.fcmdesktop.notifications.internal.SystemTheme
@@ -12,13 +15,16 @@ import java.awt.Rectangle
 import java.awt.Toolkit
 import java.awt.Window
 import java.awt.geom.RoundRectangle2D
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import javax.swing.JDialog
 import javax.swing.SwingUtilities
 import javax.swing.Timer
 import javax.swing.WindowConstants
 
 /**
- * Shows [RichNotification]s as small always-on-top windows stacked in a corner of the screen.
+ * Shows [RichNotification]s, either as small always-on-top windows stacked in a corner of the
+ * screen or, with [NotificationBackend.Native], as real notifications of the operating system.
  *
  * One instance per app is enough. Every method can be called from any thread.
  *
@@ -63,23 +69,63 @@ public class DesktopNotificationCenter(
     private val translucent: Boolean by lazy { fades && supports(GraphicsDevice.WindowTranslucency.PERPIXEL_TRANSLUCENT) }
     private val shaped: Boolean by lazy { !translucent && supports(GraphicsDevice.WindowTranslucency.PERPIXEL_TRANSPARENT) }
 
+    // Native notifications: process and socket I/O happen on this thread, never on the event thread.
+    private val nativeThread: ExecutorService? =
+        if (config.backend == NotificationBackend.Native) {
+            Executors.newSingleThreadExecutor { task -> Thread(task, "fcm-desktop-native").apply { isDaemon = true } }
+        } else {
+            null
+        }
+    private var native: NativeBackend? = null
+    private var nativeResolved = false
+
+    /** Created on first use; null when this OS has no native backend. Only called on [nativeThread]. */
+    private fun nativeBackend(): NativeBackend? {
+        if (!nativeResolved) {
+            nativeResolved = true
+            native = NativeBackends.create(
+                NativeContext(
+                    appName = config.appName ?: "Notifications",
+                    appId = config.appId,
+                    appIcon = config.appIcon,
+                    dispatch = { block -> SwingUtilities.invokeLater { safely(block) } },
+                ),
+            )
+        }
+        return native
+    }
+
     /**
      * Shows the notification, or replaces the one with the same id. Returns its id.
-     * Does nothing on a headless JVM (see [isSupported]).
+     * In-app windows need a display: on a headless JVM they are skipped (see [isSupported]).
      */
     public fun show(notification: RichNotification): String {
-        if (supported) {
-            // Detecting the OS theme runs a short command: do it here rather than on the event thread when possible.
-            if (!SwingUtilities.isEventDispatchThread()) palette
-            onEdt { showNow(notification) }
+        if (nativeThread != null) {
+            if (nativeThread.isShutdown) return notification.id // closed
+            nativeThread.execute {
+                val shown = try {
+                    nativeBackend()?.show(notification) ?: false
+                } catch (_: Exception) {
+                    false
+                }
+                if (!shown) showInApp(notification)
+            }
+        } else {
+            showInApp(notification)
         }
         return notification.id
     }
 
+    private fun showInApp(notification: RichNotification) {
+        if (!supported) return
+        // Detecting the OS theme runs a short command: do it here rather than on the event thread when possible.
+        if (!SwingUtilities.isEventDispatchThread()) palette
+        onEdt { showNow(notification) }
+    }
+
     /** Removes a notification from the screen or from the waiting queue. */
     public fun dismiss(id: String) {
-        if (!supported) return
-        onEdt {
+        afterNative({ it.dismiss(id) }) {
             waiting.firstOrNull { it.id == id }?.let {
                 waiting.remove(it)
                 notifyDismissed(it, DismissReason.Cancelled)
@@ -89,15 +135,38 @@ public class DesktopNotificationCenter(
     }
 
     public fun dismissAll() {
-        if (supported) onEdt(::clear)
+        afterNative({ it.dismissAll() }, ::clear)
     }
 
-    /** Dismisses everything and releases the windows. Later calls to [show] are ignored. */
+    /**
+     * Closes the in-app windows and releases every resource. Later calls to [show] are ignored.
+     * Native notifications already delivered stay in the system's history.
+     */
     override fun close() {
-        if (!supported) return
-        onEdt {
+        afterNative({ it.close() }) {
             clear()
             closed = true
+        }
+        nativeThread?.shutdown()
+    }
+
+    /**
+     * Applies [onNative] to the native backend (when in use) and then [inApp] on the event thread.
+     * Going through the same threads as [show] keeps a dismiss from overtaking the show before it.
+     */
+    private fun afterNative(onNative: (NativeBackend) -> Unit, inApp: () -> Unit) {
+        val inAppStep = { if (supported) onEdt(inApp) }
+        if (nativeThread == null || nativeThread.isShutdown) {
+            inAppStep()
+            return
+        }
+        nativeThread.execute {
+            try {
+                if (nativeResolved) native?.let(onNative)
+            } catch (_: Exception) {
+                // the OS side is best effort
+            }
+            inAppStep()
         }
     }
 
@@ -332,7 +401,7 @@ public class DesktopNotificationCenter(
         private const val SLIDE = 24
         private const val CORNER = 14f
 
-        /** False on a headless JVM, where no window can be shown. */
+        /** False on a headless JVM, where in-app windows cannot be shown (native notifications still can). */
         public val isSupported: Boolean get() = !GraphicsEnvironment.isHeadless()
     }
 }

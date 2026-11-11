@@ -42,7 +42,7 @@ kotlin {
     sourceSets {
         val desktopMain by getting {          // o jvmMain, según el nombre de tu target
             dependencies {
-                implementation("com.github.eliasmp07:fcm-desktop:v0.2.0")
+                implementation("com.github.eliasmp07:fcm-desktop:v0.3.0")
             }
         }
     }
@@ -190,8 +190,46 @@ Las imágenes pueden venir de una URL, un archivo, un recurso del classpath, byt
 A tener en cuenta:
 
 - Los callbacks corren en el hilo de eventos de AWT. Lanza una corrutina para lo que tarde.
-- Son ventanas de tu app, no notificaciones del sistema: no aparecen en el historial del SO ni respetan el modo "no molestar".
-- Se muestran en la pantalla principal.
+- Las ventanas de la app se muestran en la pantalla principal.
+
+### Notificaciones del sistema: historial y "no molestar"
+
+Por defecto las notificaciones son ventanas dibujadas por la librería. Con `backend = NotificationBackend.Native` se entregan al sistema operativo, así que aparecen en su historial de notificaciones y respetan el modo "no molestar" / concentración:
+
+```kotlin
+val center = DesktopNotificationCenter(
+    NotificationCenterConfig(
+        appName = "MiApp",
+        appIcon = NotificationImage.Resource("icon.png"),
+        backend = NotificationBackend.Native,
+    ),
+)
+```
+
+La misma `RichNotification` sirve con los dos backends. Qué puede mostrar cada sistema:
+
+| | Windows 10/11 | Linux (GNOME, KDE Plasma, ...) | macOS |
+|---|---|---|---|
+| Las muestra | notificaciones toast | servicio de notificaciones de freedesktop.org | ventanas de la app |
+| Historial y "no molestar" | sí | sí | no |
+| Imagen grande, avatar | sí | una imagen (gana la grande) | sí |
+| Botones | sí | sí | sí |
+| Respuesta rápida | sí | solo KDE Plasma; en el resto esa notificación usa ventana de la app | sí |
+| Reemplazar por `id`, `dismiss` | sí | sí | sí |
+
+Lo que el sistema no puede mostrar cae a la ventana de la app, así que no se pierde nada: todo en macOS (ahí las notificaciones nativas enriquecidas requieren un bundle firmado y código nativo) y lo que no soporte el escritorio de Linux.
+
+Diferencias con el backend de la app:
+
+- Las dibuja el sistema: `theme`, `position`, `width`, `accentColor` y `maxVisible` no aplican, y el sistema decide cuánto dura el banner. `timeoutMillis = 0` pide uno persistente.
+- En Windows, cualquier botón cierra el toast, así que `dismissOnClick = false` no tiene efecto. `onDismiss` no se llama cuando el banner solo se oculta, porque el toast sigue en el centro de notificaciones.
+- Windows necesita que la app esté registrada: en el primer uso la librería escribe una clave de registro del usuario (`HKCU\Software\Classes\AppUserModelId\<appId>`) con el nombre y el icono. Pasa `appId` para usar el AppUserModelID del acceso directo de tu instalador.
+- Los toasts de Windows pasan por un proceso oculto de Windows PowerShell que vive mientras viva el centro.
+- Botones y respuestas solo funcionan con la app abierta. Después las notificaciones siguen en el historial pero ya no hacen nada.
+- Linux necesita una JVM con sockets Unix (JDK 16+); con JVMs anteriores se usan las ventanas de la app.
+
+> [!NOTE]
+> El backend de Linux está probado contra un bus D-Bus real. El de Windows no se pudo ejecutar en Windows antes de publicar: el XML del toast tiene pruebas, el helper de PowerShell no. Reporta lo que veas.
 
 ## Enviar desde el backend
 
@@ -220,11 +258,12 @@ Topics: el token de desktop no se puede suscribir desde el cliente; suscríbelo 
 
 ## Estado de las pruebas
 
-`./gradlew test` corre 43 pruebas:
+`./gradlew test` corre 52 pruebas:
 
 - El codec protobuf escrito a mano produce los mismos bytes que `protobuf` con los `.proto` de referencia.
 - El descifrado Web Push abre mensajes cifrados por `http_ece` (Python), en ambos formatos y con varios registros.
 - Las notificaciones: ajuste de texto, límites de imágenes, layout de la tarjeta y, cuando hay pantalla, apilado, cola, timeouts, acciones y respuestas sobre ventanas reales.
+- Las notificaciones del sistema: el XML del toast de Windows, y el backend de Linux contra un bus de sesión real con un servicio de notificaciones falso (`tools/fake_notification_server.py`, se activa con `FCM_DESKTOP_DBUS_TEST=1`).
 - Un servidor falso local (HTTP + MCS) ejercita el flujo completo: registro, login, entrega, acks, duplicados, reinicio con el mismo token, reconexión, heartbeat, re-registro al rechazar el login, refresco y borrado de token.
 
 Lo que **no** cubren: los servidores reales de Google. Los fixtures se regeneran con `python tools/generate_fixtures.py`.
