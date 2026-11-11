@@ -162,6 +162,7 @@ internal class McsClient(
                 }
                 TAG_DATA_MESSAGE_STANZA -> {
                     val message = decodeDataMessage(payload)
+                    logger.log(LogLevel.Debug, "MCS data message from ${message.from} (${message.rawData?.size ?: 0} bytes, keys=${message.appData.keys})", null)
                     try {
                         onMessage(message)
                     } finally {
@@ -171,7 +172,7 @@ internal class McsClient(
                 }
                 TAG_HEARTBEAT_PING -> write(TAG_HEARTBEAT_ACK, encodeHeartbeat(pendingStreamId()))
                 TAG_CLOSE -> throw IOException("MCS server closed the connection")
-                TAG_HEARTBEAT_ACK, TAG_IQ_STANZA -> Unit
+                TAG_HEARTBEAT_ACK, TAG_IQ_STANZA -> logger.log(LogLevel.Debug, "MCS frame tag $tag", null)
                 else -> logger.log(LogLevel.Debug, "Ignoring MCS frame with tag $tag", null)
             }
         }

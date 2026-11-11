@@ -115,6 +115,11 @@ public fun interface FcmLogger {
         /** Discards everything. */
         public val None: FcmLogger = FcmLogger { _, _, _ -> }
 
+        /** Prints everything to stderr, including every frame exchanged with FCM. Use it to diagnose delivery. */
+        public val Verbose: FcmLogger = FcmLogger { level, message, throwable ->
+            System.err.println("[fcm-desktop] $level: $message" + (throwable?.let { " ($it)" } ?: ""))
+        }
+
         /** Prints Info and above to stderr. */
         public val Stderr: FcmLogger = FcmLogger { level, message, throwable ->
             if (level != LogLevel.Debug) {

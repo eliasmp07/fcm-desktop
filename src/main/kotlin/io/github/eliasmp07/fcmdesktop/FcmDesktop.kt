@@ -251,6 +251,11 @@ public class FcmDesktop internal constructor(
             logger.log(LogLevel.Warn, "Could not decrypt a push message", e)
             return
         }
+        logger.log(
+            LogLevel.Info,
+            "Push received (${if (message.notification != null) "notification" else "data only"}, ${message.data.size} data keys)",
+            null,
+        )
         _messages.emit(message)
 
         val notification = message.notification

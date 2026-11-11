@@ -42,7 +42,7 @@ kotlin {
     sourceSets {
         val desktopMain by getting {          // o jvmMain, según el nombre de tu target
             dependencies {
-                implementation("com.github.eliasmp07:fcm-desktop:v0.3.0")
+                implementation("com.github.eliasmp07:fcm-desktop:v0.3.1")
             }
         }
     }

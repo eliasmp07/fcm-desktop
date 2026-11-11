@@ -78,6 +78,7 @@ public class DesktopNotificationCenter(
         }
     private var native: NativeBackend? = null
     private var nativeResolved = false
+    private var fallbackLogged = false
 
     /** Created on first use; null when this OS has no native backend. Only called on [nativeThread]. */
     private fun nativeBackend(): NativeBackend? {
@@ -108,7 +109,13 @@ public class DesktopNotificationCenter(
                 } catch (_: Exception) {
                     false
                 }
-                if (!shown) showInApp(notification)
+                if (!shown) {
+                    if (!fallbackLogged) {
+                        fallbackLogged = true
+                        System.err.println("[fcm-desktop] Native notifications are not available for this notification; using in-app windows")
+                    }
+                    showInApp(notification)
+                }
             }
         } else {
             showInApp(notification)

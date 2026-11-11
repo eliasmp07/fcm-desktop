@@ -11,6 +11,8 @@ import java.net.Socket
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -39,6 +41,9 @@ internal class WindowsToasts private constructor(
     private val lock = Any()
     private val byTag = HashMap<String, RichNotification>()
 
+    /** Answers of the helper to "show" commands that are still waiting, by tag. */
+    private val showResults = ConcurrentHashMap<String, CompletableFuture<Boolean>>()
+
     @Volatile
     private var failed = false
 
@@ -49,6 +54,7 @@ internal class WindowsToasts private constructor(
             close()
             throw IllegalStateException("the Windows notification helper did not start")
         }
+        log("Windows notifications ready (appId=$appId)")
     }
 
     override fun show(notification: RichNotification): Boolean {
@@ -60,7 +66,19 @@ internal class WindowsToasts private constructor(
         )
         val tag = tagFor(notification.id)
         synchronized(lock) { byTag[tag] = notification }
-        return send("S\t$tag\t${encode(xml)}")
+        // Wait for Windows to accept the toast: a rejected one must fall back, not vanish.
+        val result = CompletableFuture<Boolean>()
+        showResults[tag] = result
+        val accepted = try {
+            send("S\t$tag\t${encode(xml)}") && result.get(SHOW_SECONDS, TimeUnit.SECONDS)
+        } catch (_: Exception) {
+            log("Windows did not confirm the notification in time")
+            false
+        } finally {
+            showResults.remove(tag, result)
+        }
+        if (!accepted) synchronized(lock) { byTag.remove(tag) }
+        return accepted
     }
 
     override fun dismiss(id: String) {
@@ -94,6 +112,12 @@ internal class WindowsToasts private constructor(
                 val parts = line.trim().split('\t')
                 when (parts[0]) {
                     "ready" -> ready.countDown()
+                    "shown" -> showResults[parts.getOrNull(1).orEmpty()]?.complete(true)
+                    "warning" -> log("Windows notification warning: ${decode(parts.getOrNull(2))}")
+                    "error" -> {
+                        log("Windows notification error: ${decode(parts.getOrNull(2))}")
+                        showResults[parts.getOrNull(1).orEmpty()]?.complete(false)
+                    }
                     "activated" -> onActivated(parts.getOrNull(1).orEmpty(), decode(parts.getOrNull(2)), decode(parts.getOrNull(3)))
                     "dismissed" -> onDismissed(parts.getOrNull(1).orEmpty(), parts.getOrNull(2).orEmpty())
                 }
@@ -103,6 +127,7 @@ internal class WindowsToasts private constructor(
         }
         failed = true
         ready.countDown()
+        showResults.values.forEach { it.complete(false) }
     }
 
     private fun onActivated(tag: String, arguments: String, text: String) {
@@ -148,6 +173,9 @@ internal class WindowsToasts private constructor(
 
     companion object {
         private const val STARTUP_SECONDS = 20L
+        private const val SHOW_SECONDS = 8L
+
+        private fun log(message: String) = System.err.println("[fcm-desktop] $message")
         private const val ARG_CLICK = "click"
         private const val ARG_REPLY = "reply"
         private const val ARG_ACTION = "action-"
@@ -174,8 +202,14 @@ internal class WindowsToasts private constructor(
                 val process = ProcessBuilder(
                     powershell.absolutePath, "-NoLogo", "-NoProfile", "-NonInteractive", "-InputFormat", "None",
                     "-WindowStyle", "Hidden", "-EncodedCommand", Base64.getEncoder().encodeToString(script.toByteArray(Charsets.UTF_16LE)),
-                ).redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+                ).redirectErrorStream(true).start()
                 process.outputStream.close()
+                // Anything PowerShell itself prints (a blocked script, a missing module) is worth seeing.
+                Thread({
+                    runCatching {
+                        process.inputStream.bufferedReader().forEachLine { if (it.isNotBlank()) log("PowerShell: ${it.take(500)}") }
+                    }
+                }, "fcm-desktop-toasts-output").apply { isDaemon = true }.start()
                 try {
                     val socket = server.accept()
                     socket.soTimeout = (STARTUP_SECONDS * 1000).toInt()
@@ -195,6 +229,7 @@ internal class WindowsToasts private constructor(
                     socket.soTimeout = 0
                     return WindowsToasts(context, process, socket, ImageFiles.temporary()).also { it.start(appId, iconFile) }
                 } catch (e: Exception) {
+                    log("Could not start the Windows notification helper: $e")
                     process.destroyForcibly()
                     throw e
                 }
@@ -312,6 +347,9 @@ internal class WindowsToasts private constructor(
                 if (${'$'}icon) { Set-ItemProperty -LiteralPath ${'$'}key -Name IconUri -Value ${'$'}icon }
                 ${'$'}manager = [Windows.UI.Notifications.ToastNotificationManager]
                 ${'$'}notifier = ${'$'}manager::CreateToastNotifier(${'$'}appId)
+                if (${'$'}notifier.Setting -ne 'Enabled') {
+                    ${'$'}writer.WriteLine("warning`t`t" + (Enc "notifications are turned off in Windows for this app or user: ${'$'}(${'$'}notifier.Setting)"))
+                }
             } catch {
                 ${'$'}writer.WriteLine("error`t`t" + (Enc ${'$'}_))
                 exit 1
@@ -339,10 +377,16 @@ internal class WindowsToasts private constructor(
                                 ${'$'}toast.Group = 'fcm'
                                 Forget ${'$'}tag
                                 ${'$'}sequence++
-                                foreach (${'$'}name in 'Activated', 'Dismissed') {
-                                    Register-ObjectEvent -InputObject ${'$'}toast -EventName ${'$'}name -SourceIdentifier "${'$'}name|${'$'}tag|${'$'}sequence" | Out-Null
+                                try {
+                                    foreach (${'$'}name in 'Activated', 'Dismissed', 'Failed') {
+                                        Register-ObjectEvent -InputObject ${'$'}toast -EventName ${'$'}name -SourceIdentifier "${'$'}name|${'$'}tag|${'$'}sequence" | Out-Null
+                                    }
+                                } catch {
+                                    # Without events the buttons do nothing, but the toast can still be shown.
+                                    ${'$'}writer.WriteLine("warning`t${'$'}tag`t" + (Enc "events unavailable: ${'$'}_"))
                                 }
                                 ${'$'}notifier.Show(${'$'}toast)
+                                ${'$'}writer.WriteLine("shown`t${'$'}tag")
                                 ${'$'}toasts[${'$'}tag] = @{ Toast = ${'$'}toast; Sequence = ${'$'}sequence }
                                 if (${'$'}toasts.Count -gt 200) {
                                     ${'$'}oldest = ${'$'}toasts.GetEnumerator() | Sort-Object { ${'$'}_.Value.Sequence } | Select-Object -First 50
@@ -368,6 +412,9 @@ internal class WindowsToasts private constructor(
                                 ${'$'}text = ''
                                 try { if (${'$'}data.UserInput.ContainsKey('reply')) { ${'$'}text = [string]${'$'}data.UserInput['reply'] } } catch { }
                                 ${'$'}writer.WriteLine("activated`t" + ${'$'}id[1] + "`t" + (Enc ${'$'}data.Arguments) + "`t" + (Enc ${'$'}text))
+                            } elseif (${'$'}id[0] -eq 'Failed') {
+                                ${'$'}data = [Windows.UI.Notifications.ToastFailedEventArgs]${'$'}queued.SourceArgs[1]
+                                ${'$'}writer.WriteLine("warning`t" + ${'$'}id[1] + "`t" + (Enc "Windows could not display the toast: ${'$'}(${'$'}data.ErrorCode)"))
                             } else {
                                 ${'$'}data = [Windows.UI.Notifications.ToastDismissedEventArgs]${'$'}queued.SourceArgs[1]
                                 ${'$'}writer.WriteLine("dismissed`t" + ${'$'}id[1] + "`t" + ${'$'}data.Reason)
