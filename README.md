@@ -2,8 +2,10 @@
 
 # fcm-desktop
 
-**Firebase Cloud Messaging push notifications for desktop (JVM)**<br>
-The missing piece for Kotlin Multiplatform and Compose Desktop apps.
+### Firebase Cloud Messaging (FCM) push notifications for Kotlin Multiplatform and Compose Desktop
+
+Push notifications for KMP desktop apps on Windows, macOS and Linux:<br>
+a real FCM token, real-time delivery, and rich notifications with images, actions and inline reply.
 
 [![JitPack](https://jitpack.io/v/eliasmp07/fcm-desktop.svg)](https://jitpack.io/#eliasmp07/fcm-desktop)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.1-7F52FF?logo=kotlin&logoColor=white)
@@ -16,7 +18,7 @@ The missing piece for Kotlin Multiplatform and Compose Desktop apps.
 
 ---
 
-Firebase ships messaging SDKs for Android, iOS and the web, but not for desktop. `fcm-desktop` fills that gap: it gives your desktop app a **regular FCM registration token** and delivers pushes in real time, so your backend sends to desktop exactly the way it already sends to Android and iOS.
+Firebase ships messaging SDKs for Android, iOS and the web, but not for desktop, so a Kotlin Multiplatform (KMP) or Compose Multiplatform app has no way to receive push notifications on its desktop (JVM) target. `fcm-desktop` fills that gap: it gives your desktop app a **regular FCM registration token** and delivers pushes in real time, so your backend sends to desktop exactly the way it already sends to Android and iOS.
 
 ```kotlin
 val fcm = FcmDesktop(FirebaseDesktopOptions(projectId = "...", appId = "...", apiKey = "..."))

@@ -1,8 +1,10 @@
 # fcm-desktop
 
+### Notificaciones push de Firebase Cloud Messaging (FCM) para Kotlin Multiplatform y Compose Desktop
+
 [English](README.md) · **Español**
 
-Notificaciones push de **Firebase Cloud Messaging en desktop (JVM)** para apps Kotlin Multiplatform / Compose Desktop.
+Notificaciones push para apps KMP de escritorio en Windows, macOS y Linux: un token FCM real, entrega en tiempo real y notificaciones enriquecidas con imágenes, botones y respuesta rápida.
 
 Firebase no tiene SDK de mensajería para desktop. Esta librería hace lo mismo que hace Chrome cuando una web se suscribe a push: registra el equipo en FCM, obtiene un **token FCM normal** y mantiene un socket abierto con `mtalk.google.com` para recibir los mensajes. Tu backend le manda al token de desktop igual que a los de Android e iOS.
 
