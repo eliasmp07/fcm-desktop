@@ -1,1 +1,1 @@
-rootProject.name = "fcm-desktop"
+rootProject.name = "kmp-desktop-push"

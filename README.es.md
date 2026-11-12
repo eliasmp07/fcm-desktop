@@ -1,4 +1,4 @@
-# fcm-desktop
+# kmp-desktop-push
 
 ### Notificaciones push de Firebase Cloud Messaging (FCM) para Kotlin Multiplatform y Compose Desktop
 
@@ -24,7 +24,7 @@ No necesitas clave VAPID: si no pasas `vapidKey` se usa la de FCM por defecto.
 
 ## 2. Instalar
 
-Se publica con [JitPack](https://jitpack.io/#eliasmp07/fcm-desktop). Agrega el repositorio:
+Se publica con [JitPack](https://jitpack.io/#eliasmp07/kmp-desktop-push). Agrega el repositorio:
 
 ```kotlin
 // settings.gradle.kts
@@ -44,7 +44,7 @@ kotlin {
     sourceSets {
         val desktopMain by getting {          // o jvmMain, según el nombre de tu target
             dependencies {
-                implementation("com.github.eliasmp07:fcm-desktop:v0.3.1")
+                implementation("com.github.eliasmp07:kmp-desktop-push:v0.3.1")
             }
         }
     }

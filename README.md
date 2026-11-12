@@ -1,13 +1,13 @@
 <div align="center">
 
-# fcm-desktop
+# kmp-desktop-push
 
 ### Firebase Cloud Messaging (FCM) push notifications for Kotlin Multiplatform and Compose Desktop
 
 Push notifications for KMP desktop apps on Windows, macOS and Linux:<br>
 a real FCM token, real-time delivery, and rich notifications with images, actions and inline reply.
 
-[![JitPack](https://jitpack.io/v/eliasmp07/fcm-desktop.svg)](https://jitpack.io/#eliasmp07/fcm-desktop)
+[![JitPack](https://jitpack.io/v/eliasmp07/kmp-desktop-push.svg)](https://jitpack.io/#eliasmp07/kmp-desktop-push)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.1-7F52FF?logo=kotlin&logoColor=white)
 ![JVM](https://img.shields.io/badge/JVM-11%2B-orange)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
@@ -18,7 +18,7 @@ a real FCM token, real-time delivery, and rich notifications with images, action
 
 ---
 
-Firebase ships messaging SDKs for Android, iOS and the web, but not for desktop, so a Kotlin Multiplatform (KMP) or Compose Multiplatform app has no way to receive push notifications on its desktop (JVM) target. `fcm-desktop` fills that gap: it gives your desktop app a **regular FCM registration token** and delivers pushes in real time, so your backend sends to desktop exactly the way it already sends to Android and iOS.
+Firebase ships messaging SDKs for Android, iOS and the web, but not for desktop, so a Kotlin Multiplatform (KMP) or Compose Multiplatform app has no way to receive push notifications on its desktop (JVM) target. `kmp-desktop-push` fills that gap: it gives your desktop app a **regular FCM registration token** and delivers pushes in real time, so your backend sends to desktop exactly the way it already sends to Android and iOS.
 
 ```kotlin
 val fcm = FcmDesktop(FirebaseDesktopOptions(projectId = "...", appId = "...", apiKey = "..."))
@@ -79,7 +79,7 @@ kotlin {
     sourceSets {
         val desktopMain by getting {          // or jvmMain, depending on your target name
             dependencies {
-                implementation("com.github.eliasmp07:fcm-desktop:v0.3.1")
+                implementation("com.github.eliasmp07:kmp-desktop-push:v0.3.1")
             }
         }
     }
@@ -333,12 +333,12 @@ Send to a desktop token like any other, for example with the HTTP v1 API:
 
 ## How it works
 
-`fcm-desktop` registers the way a browser does when a site subscribes to web push, then listens on the same channel:
+`kmp-desktop-push` registers the way a browser does when a site subscribes to web push, then listens on the same channel:
 
 ```mermaid
 sequenceDiagram
     participant App as Your app
-    participant Lib as fcm-desktop
+    participant Lib as kmp-desktop-push
     participant G as Google
     App->>Lib: start()
     Lib->>G: Device check-in
