@@ -53,6 +53,7 @@ fcm.start()
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 - [Testing](#testing)
+- [Changelog](CHANGELOG.md)
 
 ## Installation
 
@@ -176,7 +177,15 @@ class DesktopPushService(private val fcm: FcmDesktop) : PushService {
 
 ### Notifications
 
-Messages with a `notification` block are displayed automatically by `SystemDesktopNotifier`:
+Messages with a `notification` block are displayed for you. There are three ways to show them:
+
+| Option | How | Looks like | Pictures, buttons, reply | System history and Do Not Disturb |
+|---|---|---|---|---|
+| Default | nothing to set up (`SystemDesktopNotifier`) | basic OS balloon | no | depends on the OS |
+| Rich, in-app | `RichDesktopNotifier(center)` | cards drawn by the library, identical everywhere | yes | no |
+| Rich, native | same, with `backend = NotificationBackend.Native` | Windows toasts / Linux desktop notifications | yes | yes |
+
+The last two are covered in [Rich notifications](#rich-notifications). The default uses:
 
 | OS | Backend |
 |---|---|
@@ -184,7 +193,7 @@ Messages with a `notification` block are displayed automatically by `SystemDeskt
 | macOS | Notification Center through `osascript` (attributed to "Script Editor"). |
 | Linux | `notify-send`, falling back to the system tray. |
 
-For pictures, buttons and replies use the built-in [rich notifications](#rich-notifications). To own the UI entirely, pass a custom `DesktopNotifier`, or `notifier = null` and render from `messages`. Data-only messages never display anything.
+To own the UI entirely, pass a custom `DesktopNotifier`, or `notifier = null` and render from `messages`. Data-only messages never display anything.
 
 ### Configuration
 
@@ -201,7 +210,7 @@ FcmDesktopConfig(
 Other extension points:
 
 - **`CredentialStore`**: where the registration lives between runs. The default is a per-user file (`%APPDATA%`, `~/Library/Application Support` or `~/.config`). Implement it to use an encrypted store.
-- **`FcmLogger`**: `FcmLogger.Stderr` (default), `FcmLogger.None`, or your own. Tokens and keys are never logged.
+- **`FcmLogger`**: `FcmLogger.Stderr` (default), `FcmLogger.Verbose` for diagnosing delivery, `FcmLogger.None`, or your own. Tokens and keys are never logged.
 
 ## Rich notifications
 
@@ -355,13 +364,52 @@ Payloads are end-to-end encrypted with keys generated on the device (Web Push en
 
 ## Troubleshooting
 
+### Turn on diagnostics first
+
+```kotlin
+val fcm = FcmDesktop(options, logger = FcmLogger.Verbose)
+```
+
+`FcmLogger.Verbose` prints every frame exchanged with FCM. The default logger already prints the lines that matter most:
+
+| Log line | Meaning |
+|---|---|
+| `Registered with FCM` | A new token was created. |
+| `Connected to FCM` | Logged in; pushes arrive in real time from now on. |
+| `Push received (notification, 2 data keys)` | A push reached the library and was decrypted. |
+| `Could not decrypt a push message` | A push arrived for keys this install no longer has; call `deleteToken()` and register again. |
+| `FCM connection lost: ...` | The socket dropped; a reconnect is scheduled. |
+| `Windows notifications ready (appId=...)` | The native Windows backend started. |
+| `Windows notification error: ...` / `warning: ...` | Windows rejected a toast or cannot report clicks; the text says why. |
+| `Native notifications are not available for this notification; using in-app windows` | The OS could not show it, so the in-app window was used. |
+
+### Registration and connection
+
 | Symptom | Likely cause |
 |---|---|
 | `FcmRegistrationException` with status 400 | Wrong `projectId`, `appId` or `apiKey`. |
 | `FcmRegistrationException` with status 401 or 403 | The API key is restricted, or the Firebase Installations / FCM Registration APIs are not enabled for it. |
 | Stuck in `WaitingToReconnect` | A firewall or proxy blocks `mtalk.google.com` on 5228 and 443. |
-| Token received but no pushes | Sending to an old token. Forward every emission of `token` to your backend. |
-| No notification on Linux | `notify-send` is not installed and the desktop has no system tray. |
+
+### A push does not arrive
+
+Find out which side drops it. Print the full token and send it a test from the Firebase console (**Messaging → New campaign → Send test message**), with `FcmLogger.Verbose` on.
+
+| What you see | Where the problem is |
+|---|---|
+| `Push received` in the log, nothing on screen | The notifier. Data-only messages are never displayed; for the rest see the next table. |
+| Nothing from the console either | The library or the network. Please open an issue with the verbose log. |
+| The console test arrives, your backend's does not | The backend: it is sending to an old token, filters by platform, or sends to a topic the desktop token was never subscribed to (subscribe it server-side). |
+
+### A notification is not displayed
+
+| Symptom | Likely cause |
+|---|---|
+| Nothing with the default notifier on Linux | `notify-send` is not installed and the desktop has no system tray. |
+| Nothing with `backend = Native` on Windows | Notifications are off for the app or Do Not Disturb is on (**Settings → System → Notifications**). The log has a `Windows notification` line when Windows rejects the toast. |
+| In-app window instead of a native one | Expected on macOS and for features the desktop lacks; otherwise the log says why the native backend was skipped. |
+| Buttons of a native notification do nothing | The app was closed and reopened: buttons only work during the run that showed the notification. |
+| A picture is missing | It could not be downloaded or decoded (over 5 MB, not `http(s)`, unsupported format such as WebP). The notification is shown without it. |
 
 ## Testing
 

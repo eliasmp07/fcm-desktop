@@ -121,7 +121,15 @@ class DesktopPushService(private val fcm: FcmDesktop) : PushService {
 
 ### Notificaciones
 
-Por defecto (`SystemDesktopNotifier`) un push con bloque `notification` se muestra solo:
+Los mensajes con bloque `notification` se muestran solos. Hay tres formas de mostrarlos:
+
+| Opción | Cómo | Cómo se ve | Imágenes, botones, respuesta | Historial del sistema y "no molestar" |
+|---|---|---|---|---|
+| Por defecto | sin configurar nada (`SystemDesktopNotifier`) | globo básico del sistema | no | depende del sistema |
+| Enriquecida, de la app | `RichDesktopNotifier(center)` | tarjetas dibujadas por la librería, iguales en todos lados | sí | no |
+| Enriquecida, nativa | lo mismo, con `backend = NotificationBackend.Native` | toasts de Windows / notificaciones del escritorio en Linux | sí | sí |
+
+Las dos últimas están en [Notificaciones enriquecidas](#notificaciones-enriquecidas). La opción por defecto usa:
 
 | SO | Cómo |
 |---|---|
@@ -256,6 +264,55 @@ Topics: el token de desktop no se puede suscribir desde el cliente; suscríbelo 
 - **Clave VAPID propia:** el camino con `vapidKey` no está probado; usa la de por defecto salvo que la necesites.
 - El archivo de registro (`fcm-registration.json` en la carpeta de configuración del usuario) contiene las claves privadas del dispositivo. Para guardarlo en otro lado implementa `CredentialStore`.
 
+## Solución de problemas
+
+### Primero activa el diagnóstico
+
+```kotlin
+val fcm = FcmDesktop(options, logger = FcmLogger.Verbose)
+```
+
+`FcmLogger.Verbose` imprime cada trama que se intercambia con FCM. El logger por defecto ya imprime las líneas más importantes:
+
+| Línea | Significado |
+|---|---|
+| `Registered with FCM` | Se creó un token nuevo. |
+| `Connected to FCM` | Sesión iniciada; desde aquí los push llegan en tiempo real. |
+| `Push received (notification, 2 data keys)` | Un push llegó a la librería y se descifró. |
+| `Could not decrypt a push message` | Llegó un push para llaves que esta instalación ya no tiene; llama a `deleteToken()` y registra de nuevo. |
+| `FCM connection lost: ...` | Se cayó el socket; hay una reconexión programada. |
+| `Windows notifications ready (appId=...)` | Arrancó el backend nativo de Windows. |
+| `Windows notification error: ...` / `warning: ...` | Windows rechazó un toast o no puede reportar los clics; el texto dice por qué. |
+| `Native notifications are not available for this notification; using in-app windows` | El sistema no pudo mostrarla y se usó la ventana de la app. |
+
+### Registro y conexión
+
+| Síntoma | Causa probable |
+|---|---|
+| `FcmRegistrationException` con estado 400 | `projectId`, `appId` o `apiKey` incorrectos. |
+| `FcmRegistrationException` con estado 401 o 403 | La API key está restringida, o no tiene habilitadas Firebase Installations API / FCM Registration API. |
+| Se queda en `WaitingToReconnect` | Un firewall o proxy bloquea `mtalk.google.com` en 5228 y 443. |
+
+### Un push no llega
+
+Averigua de qué lado se pierde. Imprime el token completo y mándale una prueba desde la consola de Firebase (**Messaging → Nueva campaña → Enviar mensaje de prueba**), con `FcmLogger.Verbose` activo.
+
+| Qué ves | Dónde está el problema |
+|---|---|
+| `Push received` en el log, nada en pantalla | En el notificador. Los mensajes solo-`data` nunca se muestran; para el resto ve la tabla siguiente. |
+| Nada, ni desde la consola | En la librería o la red. Abre un issue con el log detallado. |
+| Llega la prueba de la consola pero no la de tu backend | En el backend: manda a un token viejo, filtra por plataforma, o manda a un topic al que el token de desktop nunca se suscribió (suscríbelo desde el servidor). |
+
+### Una notificación no se muestra
+
+| Síntoma | Causa probable |
+|---|---|
+| Nada con el notificador por defecto en Linux | No está `notify-send` y el escritorio no tiene tray. |
+| Nada con `backend = Native` en Windows | Las notificaciones están apagadas para la app o está activo "No molestar" (**Configuración → Sistema → Notificaciones**). Si Windows rechaza el toast, el log trae una línea `Windows notification`. |
+| Sale la ventana de la app en vez de la nativa | Es lo esperado en macOS y para funciones que el escritorio no tiene; en otro caso el log dice por qué se omitió el backend nativo. |
+| Los botones de una notificación nativa no hacen nada | La app se cerró y se volvió a abrir: los botones solo funcionan durante la ejecución que mostró la notificación. |
+| Falta una imagen | No se pudo descargar o decodificar (más de 5 MB, no es `http(s)`, formato no soportado como WebP). La notificación se muestra sin ella. |
+
 ## Estado de las pruebas
 
 `./gradlew test` corre 52 pruebas:
@@ -267,3 +324,7 @@ Topics: el token de desktop no se puede suscribir desde el cliente; suscríbelo 
 - Un servidor falso local (HTTP + MCS) ejercita el flujo completo: registro, login, entrega, acks, duplicados, reinicio con el mismo token, reconexión, heartbeat, re-registro al rechazar el login, refresco y borrado de token.
 
 Lo que **no** cubren: los servidores reales de Google. Los fixtures se regeneran con `python tools/generate_fixtures.py`.
+
+## Historial de cambios
+
+Ver [CHANGELOG.md](CHANGELOG.md).
